@@ -87,7 +87,6 @@ private:
     // params
     double main_frame_rate;
     double face_frame_rate;
-
 };
 
 }

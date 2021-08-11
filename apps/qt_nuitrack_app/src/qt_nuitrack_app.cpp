@@ -32,8 +32,8 @@ QTNuitrackApp::QTNuitrackApp(ros::NodeHandle& nh) {
 
     tdv::nuitrack::Nuitrack::setConfigValue( "Realsense2Module.RGB.ProcessWidth", image_width );
     tdv::nuitrack::Nuitrack::setConfigValue( "Realsense2Module.RGB.ProcessHeight", image_height );
-    tdv::nuitrack::Nuitrack::setConfigValue( "Realsense2Module.Depth.ProcessWidth", "640" );
-    tdv::nuitrack::Nuitrack::setConfigValue( "Realsense2Module.Depth.ProcessHeight", "480" );
+    tdv::nuitrack::Nuitrack::setConfigValue( "Realsense2Module.Depth.ProcessWidth", image_width );
+    tdv::nuitrack::Nuitrack::setConfigValue( "Realsense2Module.Depth.ProcessHeight", image_height );
     // Enable Face Module
     tdv::nuitrack::Nuitrack::setConfigValue( "Faces.ToUse", "true" );
     tdv::nuitrack::Nuitrack::setConfigValue( "DepthProvider.Depth2ColorRegistration", "true" );
@@ -150,7 +150,6 @@ void QTNuitrackApp::onNewColorFrame(tdv::nuitrack::RGBFrame::Ptr frame) {
 void QTNuitrackApp::onNewDepthFrame(tdv::nuitrack::DepthFrame::Ptr frame) {
     int width = frame->getCols();
     int height = frame->getRows();
-    //ROS_INFO_STREAM(width << ", " << height);
 
     sensor_msgs::Image depth_msg;
     depth_msg.header.stamp = ros::Time::now();
