@@ -4,6 +4,8 @@
 
 #include "qt_nuitrack_app/qt_nuitrack_app.h"
 
+#include <sensor_msgs/point_cloud2_iterator.h>
+
 using namespace tdv::nuitrack;
 
 using namespace qt_nuitrack_app;
@@ -30,6 +32,8 @@ QTNuitrackApp::QTNuitrackApp(ros::NodeHandle& nh) {
 
     tdv::nuitrack::Nuitrack::setConfigValue( "Realsense2Module.RGB.ProcessWidth", image_width );
     tdv::nuitrack::Nuitrack::setConfigValue( "Realsense2Module.RGB.ProcessHeight", image_height );
+    tdv::nuitrack::Nuitrack::setConfigValue( "Realsense2Module.Depth.ProcessWidth", image_width );
+    tdv::nuitrack::Nuitrack::setConfigValue( "Realsense2Module.Depth.ProcessHeight", image_height );
     // Enable Face Module
     tdv::nuitrack::Nuitrack::setConfigValue( "Faces.ToUse", "true" );
     tdv::nuitrack::Nuitrack::setConfigValue( "DepthProvider.Depth2ColorRegistration", "true" );
@@ -51,6 +55,9 @@ QTNuitrackApp::QTNuitrackApp(ros::NodeHandle& nh) {
     colorSensor = tdv::nuitrack::ColorSensor::create();
     colorSensor->connectOnNewFrame(std::bind( &QTNuitrackApp::onNewColorFrame, this, std::placeholders::_1));
 
+    // Create depth sensor
+    depthSensor = tdv::nuitrack::DepthSensor::create();
+    depthSensor->connectOnNewFrame(std::bind( &QTNuitrackApp::onNewDepthFrame, this, std::placeholders::_1));
 
     // Start Nuitrack
     ROS_INFO_STREAM("Starting Nuitrack...");
@@ -64,10 +71,12 @@ QTNuitrackApp::QTNuitrackApp(ros::NodeHandle& nh) {
 
     serviceSuspend = nh.advertiseService("qt_nuitrack_app/suspend", &QTNuitrackApp::suspendCB, this);
     colorImagePub = nh.advertise<sensor_msgs::Image>("/camera/color/image_raw", 1);
+    depthImagePub = nh.advertise<sensor_msgs::Image>("/camera/depth/image_raw", 1);
     facePub = nh.advertise<qt_nuitrack_app::Faces>("/qt_nuitrack_app/faces", 1);
     gesturePub = nh.advertise<qt_nuitrack_app::Gestures>("/qt_nuitrack_app/gestures", 1);
     handPub = nh.advertise<qt_nuitrack_app::Hands>("/qt_nuitrack_app/hands", 1);
     skeletonPub = nh.advertise<qt_nuitrack_app::Skeletons>("/qt_nuitrack_app/skeletons", 1);
+    cloudPub = nh.advertise<sensor_msgs::PointCloud2>("/camera/depth/points", 1);
 
     if(!nh.getParam("/qt_nuitrack_app/main_frame_rate", main_frame_rate))
         main_frame_rate  = 30;
@@ -124,7 +133,7 @@ void QTNuitrackApp::onNewColorFrame(tdv::nuitrack::RGBFrame::Ptr frame) {
 
     sensor_msgs::Image color_msg;
     color_msg.header.stamp = ros::Time::now();
-    color_msg.header.frame_id = "camera_color_frame_";        
+    color_msg.header.frame_id = "camera_color_frame_";
     color_msg.height = height;
     color_msg.width = width;
     color_msg.encoding = "bgr8";    //sensor_msgs::image_encodings::TYPE_16UC1;
@@ -136,6 +145,71 @@ void QTNuitrackApp::onNewColorFrame(tdv::nuitrack::RGBFrame::Ptr frame) {
 
     // Publish color frame
     colorImagePub.publish(color_msg);
+}
+
+void QTNuitrackApp::onNewDepthFrame(tdv::nuitrack::DepthFrame::Ptr frame) {
+    int width = frame->getCols();
+    int height = frame->getRows();
+
+    sensor_msgs::Image depth_msg;
+    depth_msg.header.stamp = ros::Time::now();
+    depth_msg.header.frame_id = "camera_depth_frame_";
+    depth_msg.height = height;
+    depth_msg.width = width;
+    depth_msg.encoding = "rgb8";
+    depth_msg.is_bigendian = false;
+    depth_msg.step = 3 * width;
+
+    // The snippet below was taken from Shinsel
+    // https://github.com/shinselrobots/nuitrack_body_tracker/blob/master/src/nuitrack_body_tracker_node.cpp
+
+    sensor_msgs::PointCloud2 cloud_msg;
+    int numpoints = width * height;
+    cloud_msg.header.frame_id = "base_link";
+    cloud_msg.header.stamp = ros::Time::now();
+    cloud_msg.width  = numpoints;
+    cloud_msg.height = 1;
+    cloud_msg.is_bigendian = false;
+    cloud_msg.is_dense = false;
+    sensor_msgs::PointCloud2Modifier modifier(cloud_msg);
+    modifier.setPointCloud2FieldsByString(2,"xyz","rgb");
+    modifier.resize(numpoints);
+
+    sensor_msgs::PointCloud2Iterator<float> out_x(cloud_msg, "x");
+    sensor_msgs::PointCloud2Iterator<float> out_y(cloud_msg, "y");
+    sensor_msgs::PointCloud2Iterator<float> out_z(cloud_msg, "z");
+
+    const uint16_t* depthPtr = frame->getData();
+    for (size_t row = 0; row < height; ++row)
+    {
+        for (size_t col = 0; col < width; ++col )
+        {
+          uint16_t fulldepthValue = *(depthPtr+ col);
+          uint16_t depthValue = *(depthPtr+ col) >> 5;
+
+          depth_msg.data.push_back(depthValue);
+          depth_msg.data.push_back(depthValue);
+          depth_msg.data.push_back(depthValue);
+
+          Vector3 cloud_point = depthSensor->convertProjToRealCoords(col, row, fulldepthValue );
+
+          float X_World = cloud_point.x / 1000.0; // mm to meters
+          float Y_World = cloud_point.y / 1000.0;
+          float Z_World = cloud_point.z / 1000.0;
+
+          *out_x = Z_World;
+          *out_y = -X_World;
+          *out_z = Y_World;
+          ++out_x;
+          ++out_y;
+          ++out_z;
+
+        }
+        depthPtr += width;
+     }
+
+    depthImagePub.publish(depth_msg);
+    cloudPub.publish(cloud_msg);
 }
 
 void QTNuitrackApp::onNewFace() {
