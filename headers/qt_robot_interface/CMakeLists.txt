@@ -35,6 +35,7 @@ add_service_files(
   setting_upload.srv
   setting_download.srv
   setting_info.srv  
+  gesture_play.srv
 )
 
 ## Generate actions in the 'action' folder
